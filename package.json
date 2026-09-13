@@ -1,0 +1,28 @@
+{
+  "name": "freerdc",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danielarif26/freerdc"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --build --force",
+    "build": "tsc --build",
+    "test": "npm run build && node --test \"packages/*/dist/test/*.test.js\"",
+    "check": "npm run typecheck && npm test",
+    "test:tunnel-local": "bash scripts/tunnel-local-e2e.sh"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^22.20.2"
+  }
+}

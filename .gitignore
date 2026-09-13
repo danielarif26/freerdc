@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+*.pem
+*.key
+log/
+.freerdc/
+runtime/
+logs/

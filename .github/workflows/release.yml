@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm audit --audit-level=high
+      - run: npm ls --all
+      - run: git diff --check "$(git hash-object -t tree /dev/null)" "$GITHUB_SHA"
+      - run: npm run build
+      - name: Create source and build archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$GITHUB_REF_NAME"
+          build_root="release-stage/freerdc-${version}"
+          mkdir -p release-artifacts "$build_root"
+          git archive --format=tar.gz --prefix="freerdc-${version}/" "$GITHUB_SHA" > "release-artifacts/freerdc-${version}-source.tar.gz"
+          git archive "$GITHUB_SHA" | tar -x -C "$build_root"
+          for package_dir in packages/*; do
+            cp -R "$package_dir/dist" "$build_root/$package_dir/"
+          done
+          tar -czf "release-artifacts/freerdc-${version}-build.tar.gz" -C release-stage "freerdc-${version}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-archives
+          path: release-artifacts/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          gh run download "$GITHUB_RUN_ID" --repo "$GH_REPO" --name release-archives --dir release-artifacts
+          gh release create "$GITHUB_REF_NAME" --repo "$GH_REPO" release-artifacts/*.tar.gz --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

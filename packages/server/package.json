@@ -1,0 +1,29 @@
+{
+  "name": "@freerdc/server",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danielarif26/freerdc"
+  },
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "dependencies": {
+    "@freerdc/agent": "0.1.0",
+    "@freerdc/guard": "0.1.0",
+    "@freerdc/protocol": "0.1.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "ws": "8.21.3",
+    "zod": "^4.6.1"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@types/ws": "8.18.1"
+  },
+  "bin": {
+    "freerdc-server": "./dist/src/cli.js"
+  }
+}

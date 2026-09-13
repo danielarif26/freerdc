@@ -1,0 +1,18 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/protocol"
+    },
+    {
+      "path": "./packages/guard"
+    },
+    {
+      "path": "./packages/agent"
+    },
+    {
+      "path": "./packages/server"
+    }
+  ],
+  "extends": "./tsconfig.base.json"
+}
