@@ -1,81 +1,79 @@
-# FreeRDC — Private Desktop MCP Bridge for ChatGPT
+# FreeRDC
 
-FreeRDC Community Edition (CE) is a loopback-first MCP bridge for giving a
-remote MCP client narrowly scoped access to selected local resources. It is
-designed to run locally and can be reached privately through OpenAI Secure MCP
-Tunnel. The CE is not listed in a public connector directory and does not
-include a hosted relay or account service.
+**Give ChatGPT and Claude access to the folders you choose — and nothing else.**
 
-## What is included
+FreeRDC is an MCP server for file work with AI assistants. It reads, writes,
+searches and edits files and documents inside the folders you approve, and
+refuses everything outside them. Anything that can run commands, click the
+screen or shut the machine down is off unless you turn it on.
 
-- MCP protocol schemas, canonical errors, redaction, capability negotiation,
-  and an authenticated Ed25519 wire handshake.
-- Guarded filesystem read/search/mutation APIs with containment, denylist, size
-  limits, dry-run support, and a kill switch.
-- An argv-only process manager and RPC dispatcher. The production CLI leaves
-  process tools disabled.
-- A loopback MCP HTTP host, authenticated WebSocket agent transport,
-  backpressure, device registry, audit log, management tools, and OAuth
-  Authorization Code + PKCE support for deployments that expose those routes
-  directly.
-- Reconnect with bounded backoff and heartbeat liveness. Mutating RPCs are not
-  replayed across connector generations.
-- A production `freerdc-server` runtime with explicit roots, a loopback-only
-  listener, owner-only state/audit files, and a `STOP` sentinel.
+[Demo video](https://freerdc.sjaman.deno.net/demo.mp4) ·
+[Website](https://freerdc.sjaman.deno.net/) ·
+[Privacy](https://freerdc.sjaman.deno.net/privacy/local) ·
+Listed on the [official MCP Registry](https://registry.modelcontextprotocol.io/) as `io.github.danielarif26/freerdc`
 
-## Acceptance status
+## Why FreeRDC
 
-The previously accepted implementation baseline was **395/395 tests passing**.
-After the release security tests were added, the v0.1.0 gate is **408/408
-passing**, with typecheck and build also passing. The local Secure MCP Tunnel
-compatibility gate has passed in the recorded evidence.
+- **Containment first.** Paths outside your approved folders, `..` traversal and
+  symlink escapes are rejected before any file is touched. Protected paths such
+  as device keys are denied even inside a root.
+- **Risky tools are opt-in.** Shell, GUI and system tools are disabled by
+  default. The desktop extension exposes 23 file and document tools out of the
+  box and 84 only when you enable local power.
+- **Every tool is described and annotated.** In the desktop extension, each tool
+  has a title, a description, input and output schemas, and read-only /
+  destructive / open-world hints, so the assistant knows what it is about to do.
+- **Local.** The desktop extension runs on your Mac. Your files are not sent to
+  FreeRDC servers.
+- **Audited.** Every operation is written to a hash-chained audit log, with a
+  `STOP` file kill switch.
 
-Hosted tunnel setup, a restricted runtime key, tunnel doctor, managed runtime
-health, and stop/reconnect no-replay checks are recorded. A genuine ChatGPT UI
-tool invocation remains pending, so P7 is not fully PASS and your existing
-desktop-control service must remain available until that evidence is collected.
-See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
+## Get started
 
-## Packages
+### Claude Desktop (desktop extension)
 
-- `@freerdc/protocol`: wire schemas, RPC contracts, errors, redaction, and
-  negotiation.
-- `@freerdc/guard`: path containment, protected-path denylist, and concurrency
-  primitives.
-- `@freerdc/agent`: filesystem, process policy/manager, RPC dispatcher,
-  authenticated connector, and reconnect supervisor.
-- `@freerdc/server`: MCP tools/HTTP host, wire hub, OAuth, audit, and the
-  production runtime/CLI.
+1. Download `freerdc-0.1.0.mcpb` from
+   [Releases](https://github.com/danielarif26/freerdc/releases/latest).
+2. Open it with Claude Desktop and pick the folder(s) FreeRDC may use.
+3. Leave **local power tools** off unless you need shell or GUI access.
 
-## Build and test
+Requires macOS and Node.js 22+. Details and privacy policy:
+[`mcpb/README.md`](mcpb/README.md).
+
+### ChatGPT (self-hosted)
+
+Run the server locally and reach it privately through OpenAI Secure MCP Tunnel.
+Do not expose the local listener to the public internet. See
+[`docs/OPENAI-INTEGRATION.md`](docs/OPENAI-INTEGRATION.md) and
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+### Hosted connector — coming soon
+
+A one-click hosted connector for ChatGPT is in review. It is not yet available
+for new users.
+
+## Run from source
+
+Requires Node.js 22+, npm and Git.
 
 ```sh
-npm run typecheck
+npm ci
 npm run build
-npm test
+node packages/server/dist/src/cli.js --root /absolute/allowed/folder --port 8787
 ```
 
-## Install from GitHub
+The server binds to `127.0.0.1` only, requires at least one explicit root,
+stores state under `~/.freerdc`, and leaves process tools disabled. Create
+`~/.freerdc/STOP` to activate the kill switch. Pick the narrowest folder that
+fits the task — never add credentials, caches or unrelated projects to a root.
 
-The source installers require Node.js 22 or newer, npm, and Git. They install
-into a user-owned application-data directory, run `npm ci` and the build, and
-create a `freerdc-server` launcher without adding telemetry or payment code.
-
-Security warning: these source installers currently follow the repository's
-default branch (`main`), which is mutable. For higher assurance, review and pin
-a specific commit or tag with `FREERDC_REF` rather than following the branch.
+### Installer scripts
 
 macOS or Linux:
 
 ```sh
 curl -fsSLo install.sh https://raw.githubusercontent.com/danielarif26/freerdc/main/install.sh
 sh install.sh
-```
-
-For a reviewed tag or commit:
-
-```sh
-FREERDC_REF=<reviewed-tag-or-commit> sh install.sh
 ```
 
 Windows PowerShell:
@@ -85,54 +83,31 @@ Invoke-WebRequest https://raw.githubusercontent.com/danielarif26/freerdc/main/in
 .\install.ps1
 ```
 
-For a reviewed tag or commit:
+The installers follow the mutable `main` branch. For higher assurance, review a
+commit or tag and pin it with `FREERDC_REF=<tag-or-commit>`. Rerun with
+`--uninstall` (macOS/Linux) or `-Uninstall` (Windows) to remove an
+installer-managed copy.
 
-```powershell
-$env:FREERDC_REF = '<reviewed-tag-or-commit>'
-.\install.ps1
-```
+## Packages
 
-Add the launcher directory printed by the installer to your user `PATH` if you
-want to invoke `freerdc-server` by name. To remove only an installer-managed
-copy, rerun the downloaded script with `--uninstall` on macOS/Linux or
-`-Uninstall` on Windows. Both uninstallers verify their management marker and
-refuse to remove an unrecognized directory.
-
-## Run locally
+| Package | Purpose |
+|---|---|
+| `@freerdc/protocol` | Wire schemas, RPC contracts, errors, redaction, negotiation |
+| `@freerdc/guard` | Path containment, protected-path denylist, concurrency primitives |
+| `@freerdc/agent` | Filesystem, process policy, RPC dispatcher, authenticated connector |
+| `@freerdc/server` | MCP tools, HTTP host, OAuth, audit log, runtime CLI |
 
 ```sh
-npm run build
-node packages/server/dist/src/cli.js --root /absolute/allowed/root --port 8787
+npm run typecheck && npm run build && npm test
 ```
 
-The CLI binds only to `127.0.0.1`, requires at least one explicit root, stores
-state under `~/.freerdc` by default, and does not expose process tools. Create
-`~/.freerdc/STOP` to activate the kill switch. Choose the narrowest root that
-fits the task; never add private credentials, caches, or unrelated project
-directories to an allowlist.
+## Security
 
-## ChatGPT connectivity
+- Secrets belong in environment variables or file references — never in this
+  repository, profiles, shell history or tunnel metadata.
+- Report vulnerabilities privately; see [`SECURITY.md`](SECURITY.md).
 
-Use OpenAI Secure MCP Tunnel for private remote access; do not expose the local
-listener directly to the public internet. The CE can be used with a
-workspace-scoped tunnel and a restricted runtime key, but it is not a
-directory-listed app. A future public hosted relay and account service would
-be required for a one-click directory experience comparable to Remote Desktop
-Commander. Follow [`docs/OPENAI-INTEGRATION.md`](docs/OPENAI-INTEGRATION.md)
-and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+## License
 
-## Safety invariants
-
-- The MCP listener remains loopback-only; remote access uses the private tunnel
-  boundary.
-- Protected paths are rejected by guard policy before filesystem access.
-- Existing desktop-control tools/state are not reused as FreeRDC state and are
-  retained until FreeRDC is accepted.
-- Secret values belong in environment or file references, never in this
-  repository, profiles, shell history, or tunnel metadata.
-- The implementation does not require a paid model/API request to run its
-  local tests.
-
-FreeRDC Community Edition is released under
-[`AGPL-3.0-or-later`](LICENSE). See [`docs/EDITIONS.md`](docs/EDITIONS.md) for
-the CE scope and [`SECURITY.md`](SECURITY.md) for responsible reporting.
+Released under [AGPL-3.0-or-later](LICENSE). See
+[`docs/EDITIONS.md`](docs/EDITIONS.md) for what the Community Edition includes.
