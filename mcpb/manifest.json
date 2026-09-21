@@ -1,0 +1,396 @@
+{
+  "manifest_version": "0.3",
+  "name": "freerdc",
+  "version": "0.1.0",
+  "description": "Local FreeRDC MCP bundle for guarded workspace automation.",
+  "author": {
+    "name": "S M Arifuzzaman",
+    "url": "https://github.com/danielarif26"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danielarif26/freerdc"
+  },
+  "homepage": "https://freerdc.sjaman.deno.net/",
+  "documentation": "https://github.com/danielarif26/freerdc/blob/main/README.md",
+  "support": "https://freerdc.sjaman.deno.net/support",
+  "license": "AGPL-3.0-or-later",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.mjs",
+        "--roots",
+        "${user_config.directory}",
+        "--local-power",
+        "${user_config.local_power_tools}"
+      ]
+    }
+  },
+  "user_config": {
+    "directory": {
+      "type": "directory",
+      "title": "Workspace directories",
+      "description": "One or more local workspace directories to expose. Use absolute paths; access stays within these roots.",
+      "required": true,
+      "multiple": true
+    },
+    "local_power_tools": {
+      "type": "boolean",
+      "title": "Enable local-power tools",
+      "description": "WARNING: Enable only when you explicitly want commands, GUI actions, browser actions, system inspection, and document tools. This grants access beyond workspace-only file operations.",
+      "default": false
+    }
+  },
+  "privacy_policies": [
+    "https://freerdc.sjaman.deno.net/privacy/local"
+  ],
+  "compatibility": {
+    "platforms": [
+      "darwin"
+    ],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  },
+  "tools": [
+    {
+      "name": "fs_stat",
+      "description": "Inspect a file or directory inside an allowed workspace. Use it before edits to obtain its type, size, and modification time; paths must be absolute and contained by a configured root."
+    },
+    {
+      "name": "fs_list",
+      "description": "List entries in an allowed workspace directory. Use it to discover files before choosing an absolute path; an empty directory is a valid workspace state."
+    },
+    {
+      "name": "fs_read",
+      "description": "Read a file from an allowed workspace as UTF-8 or Base64. Use Base64 for binary data; absolute paths outside configured roots are rejected."
+    },
+    {
+      "name": "fs_info",
+      "description": "Get detailed metadata for a file or directory in an allowed workspace. Use it to inspect permissions and text line information before a guarded write, move, or deletion."
+    },
+    {
+      "name": "fs_read_batch",
+      "description": "Read up to 20 allowed workspace files in one request. Use it when comparing known files; each path remains independently subject to containment checks."
+    },
+    {
+      "name": "fs_read_lines",
+      "description": "Read a bounded line range from an allowed workspace text file. Use it to inspect a large file incrementally without reading all of it."
+    },
+    {
+      "name": "fs_tree",
+      "description": "Return a bounded recursive directory tree below an allowed workspace path. Use it to understand project layout; depth and entry limits can truncate results."
+    },
+    {
+      "name": "fs_search",
+      "description": "Search file contents below an allowed workspace path. Use it to locate text before reading or editing; result and byte limits may truncate the search."
+    },
+    {
+      "name": "fs_mkdir_p",
+      "description": "Create an allowed workspace directory and any missing parents. Use it before creating a new nested file; dryRun=plan reports the action without changing files."
+    },
+    {
+      "name": "fs_mkdir",
+      "description": "Create one new directory inside an allowed workspace. Use it when the parent already exists; it does not replace an existing directory and supports dry-run planning."
+    },
+    {
+      "name": "fs_write",
+      "description": "Create or replace a workspace file with text or Base64 data. Use an expected SHA-256 when replacing existing content and dryRun=plan to preview; writes are confined to allowed roots."
+    },
+    {
+      "name": "fs_patch",
+      "description": "Replace verified literal text in an allowed workspace file. Use it for precise edits after reading the file; it requires the current SHA-256 and supports dry-run planning."
+    },
+    {
+      "name": "fs_append",
+      "description": "Append text or Base64 data to an allowed workspace file. Use it only after checking the required current SHA-256; this changes file contents and supports dry-run planning."
+    },
+    {
+      "name": "fs_delete",
+      "description": "Delete a file inside an allowed workspace. Use only when removal is intended; provide the current SHA-256 and use dryRun=plan to preview without deletion."
+    },
+    {
+      "name": "fs_move",
+      "description": "Move or rename a file between allowed workspace paths. Use an expected SHA-256 to prevent stale changes and dryRun=plan before changing the file location."
+    },
+    {
+      "name": "device_list",
+      "description": "List registered FreeRDC devices and their capabilities. Use it before a device tool call; it exposes only safe device identity and availability data."
+    },
+    {
+      "name": "system_health",
+      "description": "Report FreeRDC service health, enabled capabilities, and kill-switch state. Use it to diagnose whether a capability is available before invoking it."
+    },
+    {
+      "name": "policy_describe",
+      "description": "Report enforced operation limits, enabled capabilities, and verified workspace roots when available. Use it to choose an absolute workspace path; credentials and unrelated machine paths are not disclosed."
+    },
+    {
+      "name": "audit_tail",
+      "description": "Read a bounded tail of FreeRDC audit records. Use it to review recent tool outcomes; records are limited and do not grant access to the underlying resources."
+    },
+    {
+      "name": "usage_stats",
+      "description": "Summarize recent audited actions and outcomes. Use it for operational diagnostics; the result is derived from a bounded audit history."
+    },
+    {
+      "name": "recent_calls",
+      "description": "List a bounded, sanitized history of completed tool calls. Use it to understand recent activity without reading full audit payloads."
+    },
+    {
+      "name": "who_am_i",
+      "description": "Identify the FreeRDC server or local runtime context. Use it to confirm which runtime is connected; it does not return account credentials."
+    },
+    {
+      "name": "get_prompts",
+      "description": "Retrieve a curated FreeRDC onboarding prompt by ID. Use it to start a common safe workflow; only the documented prompt IDs are accepted."
+    },
+    {
+      "name": "device_ping",
+      "description": "Check whether a registered remote FreeRDC device is reachable. Use it before a remote operation; the device must already be registered and online."
+    },
+    {
+      "name": "device_disconnect",
+      "description": "Disconnect a registered remote FreeRDC device. Use it only to end that device session; subsequent remote operations require reconnection."
+    },
+    {
+      "name": "device_shutdown",
+      "description": "Request shutdown of a registered remote device. Use only with explicit intent because it interrupts that device; the device must acknowledge the request."
+    },
+    {
+      "name": "device_fs_stat",
+      "description": "Inspect a file or directory on a registered remote device. Use it before remote edits; the device must be online and enforces its own allowed roots."
+    },
+    {
+      "name": "device_fs_list",
+      "description": "List an allowed directory on a registered remote device. Use it to discover remote files; the device must be online and enforces its own containment policy."
+    },
+    {
+      "name": "device_fs_read",
+      "description": "Read an allowed file from a registered remote device. Use UTF-8 or Base64 as appropriate; the remote device must be online and authorizes its own paths."
+    },
+    {
+      "name": "device_fs_search",
+      "description": "Search allowed files on a registered remote device. Use it to locate remote content before reading or editing; remote search limits may truncate results."
+    },
+    {
+      "name": "device_fs_mkdir",
+      "description": "Create an allowed directory on a registered remote device. Use dryRun=plan before changing the device; the remote device must be online."
+    },
+    {
+      "name": "device_fs_write",
+      "description": "Create or replace an allowed remote file. Use a current hash when available and dryRun=plan to preview; the remote device applies its own authorization."
+    },
+    {
+      "name": "device_fs_delete",
+      "description": "Delete an allowed remote file after verifying its current SHA-256. Use dryRun=plan first when possible; the remote device must be online."
+    },
+    {
+      "name": "device_fs_move",
+      "description": "Move or rename an allowed remote file. Use a current SHA-256 and dryRun=plan to avoid stale or unintended changes; the remote device enforces containment."
+    },
+    {
+      "name": "device_process_start",
+      "description": "Start an approved process on a registered remote device. Use only when execution is intended; the remote device must be online and applies its command policy."
+    },
+    {
+      "name": "device_process_read",
+      "description": "Read and consume buffered output for a remote process. Use it after starting a process; repeated reads can differ because returned output is consumed."
+    },
+    {
+      "name": "device_process_input",
+      "description": "Send text or Base64 input to a running remote process. Use only for the intended process because input can change its behavior."
+    },
+    {
+      "name": "device_process_kill",
+      "description": "Stop a process on a registered remote device. Use only when termination is intended; the remote device must be online and the process ID must be valid."
+    },
+    {
+      "name": "device_process_list",
+      "description": "List processes managed by a registered remote device. Use it to find a process ID before reading, sending input, or stopping a process."
+    },
+    {
+      "name": "terminal_start",
+      "description": "Start an approved local process without waiting for completion. Use terminal_read or process_wait afterwards; command policy, working-directory limits, and dry-run checks apply."
+    },
+    {
+      "name": "terminal_exec",
+      "description": "Run an approved local command and return its bounded output. Use it for a command expected to finish; command policy and output limits apply, and dryRun=plan makes no change."
+    },
+    {
+      "name": "terminal_exec_batch",
+      "description": "Run up to eight approved local commands and return bounded per-command results. Use it for independent commands; each command remains subject to command policy and output limits."
+    },
+    {
+      "name": "process_wait",
+      "description": "Wait up to the requested timeout for a managed process to exit. Use it after terminal_start; it reads status and does not send process input."
+    },
+    {
+      "name": "terminal_read",
+      "description": "Read and consume buffered output and status of a managed local process. Use it after starting a process; repeated reads can differ and output may be truncated by configured limits."
+    },
+    {
+      "name": "terminal_input",
+      "description": "Send text or Base64 input to a managed local process. Use only for the intended process because input can change command behavior."
+    },
+    {
+      "name": "terminal_kill",
+      "description": "Stop a managed local process by ID. Use only when termination is intended; force changes how termination is requested."
+    },
+    {
+      "name": "process_kill",
+      "description": "Stop a managed local process by ID. Use only when termination is intended; force changes how termination is requested."
+    },
+    {
+      "name": "terminal_list",
+      "description": "List local processes currently managed by FreeRDC. Use it to find a process ID before reading output, sending input, waiting, or stopping it."
+    },
+    {
+      "name": "process_list",
+      "description": "List local processes currently managed by FreeRDC. Use it to find a process ID before reading output, sending input, waiting, or stopping it."
+    },
+    {
+      "name": "system_snapshot",
+      "description": "Report a sanitized local system snapshot. Use it for diagnostics before local-power actions; it does not expose credentials."
+    },
+    {
+      "name": "system_ping",
+      "description": "Check that the local-power runtime is responsive. Use it before local-power operations when availability is uncertain."
+    },
+    {
+      "name": "system_identity",
+      "description": "Report a sanitized identity for the local runtime. Use it to confirm the connected machine; it does not return credentials."
+    },
+    {
+      "name": "service_restart",
+      "description": "Restart the local FreeRDC service after an explicit confirmation token. Use only to recover or apply local service changes; dryRun=plan does not restart it."
+    },
+    {
+      "name": "system_processes",
+      "description": "List a bounded set of local system processes sorted by CPU or memory. Use it for diagnostics before requesting a targeted process stop."
+    },
+    {
+      "name": "network_listeners",
+      "description": "List a bounded set of local listening network endpoints. Use it for diagnostics; the result is observational and may be limited."
+    },
+    {
+      "name": "system_process_kill",
+      "description": "Stop a local system process after matching its expected command. Use only with explicit intent; PID and command matching reduce accidental termination."
+    },
+    {
+      "name": "search_start",
+      "description": "Start a bounded local search and return a search ID. Use search_results to page through it and search_stop to release it; search state can expire."
+    },
+    {
+      "name": "search_results",
+      "description": "Read a page of results from a previously started local search. Use the search ID from search_start; result availability depends on retained search state."
+    },
+    {
+      "name": "search_stop",
+      "description": "Stop a retained local search and release its state. Use it when results are no longer needed; stopping an already absent search is safe."
+    },
+    {
+      "name": "search_list",
+      "description": "List retained local searches. Use it to find an active search ID before reading results or stopping a search."
+    },
+    {
+      "name": "config_get",
+      "description": "Read the small set of safe local FreeRDC configuration values. Use it before changing a supported setting; secrets are not included."
+    },
+    {
+      "name": "config_set",
+      "description": "Set a supported local FreeRDC configuration value. Use only for the named setting accepted by the schema; writing the same value is idempotent."
+    },
+    {
+      "name": "project_search",
+      "description": "Search a local project path for text. Use it to locate source before reading or editing; the local-power runtime applies its project safeguards."
+    },
+    {
+      "name": "git_status",
+      "description": "Read Git working-tree status for a local project path. Use it before edits or commits; it does not modify the repository."
+    },
+    {
+      "name": "git_diff",
+      "description": "Read a bounded Git diff for a local project path. Use it to review unstaged or staged changes; it does not modify the repository."
+    },
+    {
+      "name": "headless_browser_get",
+      "description": "Fetch and extract bounded text from a URL with the headless browser. Use it to inspect a web page; it makes an external network request."
+    },
+    {
+      "name": "headless_browser_screenshot",
+      "description": "Load a URL and save a screenshot to an authorized path. Use dryRun=plan before writing; it makes an external network request and changes the local filesystem."
+    },
+    {
+      "name": "browser_tabs",
+      "description": "List tabs in the selected local browser. Use it to choose a tab before activation; it only observes the local browser."
+    },
+    {
+      "name": "browser_open",
+      "description": "Open a URL in the selected local browser. Use it only when navigation is intended; the browser may make external network requests."
+    },
+    {
+      "name": "give_feedback_to_desktop_commander",
+      "description": "Open the Desktop Commander feedback page in Chrome. Use it only when the user intends to provide feedback; it opens an external website."
+    },
+    {
+      "name": "browser_activate_tab",
+      "description": "Bring a specified tab in the selected local browser to the foreground. Use it to focus an existing tab; indices must come from browser_tabs."
+    },
+    {
+      "name": "gui_apps",
+      "description": "List eligible local GUI applications. Use it to select an application before an explicit GUI action."
+    },
+    {
+      "name": "gui_activate_app",
+      "description": "Bring an eligible local GUI application to the foreground. Use it before an intended GUI interaction; it changes local window focus."
+    },
+    {
+      "name": "gui_keystroke",
+      "description": "Send text keystrokes to an eligible local GUI application. Use only with explicit intent because it can modify application data or trigger actions."
+    },
+    {
+      "name": "gui_screenshot",
+      "description": "Capture a local GUI screenshot to an authorized path. Use dryRun=plan before writing; screenshots can contain sensitive on-screen information."
+    },
+    {
+      "name": "gui_click",
+      "description": "Click a coordinate in an eligible local GUI application. Use only with explicit intent because a click can trigger application actions."
+    },
+    {
+      "name": "document_read",
+      "description": "Extract bounded content from an allowed text, PDF, DOCX, or XLSX document. Use it to inspect a document before editing; page, sheet, range, and character limits apply."
+    },
+    {
+      "name": "pdf_create",
+      "description": "Create a PDF from Markdown at an allowed path. Use dryRun=plan before writing and provide a current hash when replacing an existing file."
+    },
+    {
+      "name": "pdf_edit",
+      "description": "Create an edited PDF by deleting or inserting pages into a destination file. Use dryRun=plan before writing; source and insertion files must be authorized."
+    },
+    {
+      "name": "pdf_render",
+      "description": "Render selected PDF pages into image files in an allowed output directory. Use dryRun=plan before creating files; page and dimension limits apply."
+    },
+    {
+      "name": "docx_create",
+      "description": "Create a DOCX document from Markdown at an allowed path. Use dryRun=plan before writing and provide a current hash when replacing an existing file."
+    },
+    {
+      "name": "docx_patch",
+      "description": "Apply a verified XML replacement inside an allowed DOCX document. Use only after reading and hashing the current file; dryRun=plan previews the change."
+    },
+    {
+      "name": "xlsx_write",
+      "description": "Create or replace an XLSX worksheet from bounded rows. Use dryRun=plan before writing and provide a current hash when replacing a file."
+    },
+    {
+      "name": "xlsx_patch",
+      "description": "Replace a bounded XLSX cell range in an allowed workbook. Use a current SHA-256 and dryRun=plan to prevent stale or unintended changes."
+    }
+  ]
+}
