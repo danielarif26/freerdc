@@ -47,10 +47,31 @@ Do not expose the local listener to the public internet. See
 [`docs/OPENAI-INTEGRATION.md`](docs/OPENAI-INTEGRATION.md) and
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
-### Hosted connector — coming soon
+### ChatGPT hosted connector (early access)
 
-A one-click hosted connector for ChatGPT is in review. It is not yet available
-for new users.
+The hosted connector is in review for the ChatGPT app directory. Until it is
+listed, add it in ChatGPT developer mode with the MCP URL
+`https://freerdc.sjaman.deno.net/mcp`.
+
+1. Connect FreeRDC in ChatGPT. The sign-in page shows a 10-character pairing
+   code (letters A–Z and digits 2–9).
+2. Download `freerdc-agent-hosted.mjs` from
+   [Releases](https://github.com/danielarif26/freerdc/releases/latest).
+   Requires Node.js 22+.
+3. Pair this computer, choosing the folder ChatGPT may use:
+
+   ```sh
+   node freerdc-agent-hosted.mjs connect --server https://freerdc.sjaman.deno.net/mcp --code YOUR_CODE --device-id my-mac --root /absolute/allowed/folder
+   ```
+
+4. Keep the agent running while you use FreeRDC:
+
+   ```sh
+   node freerdc-agent-hosted.mjs run --device-id my-mac
+   ```
+
+The pairing code expires after about 10 minutes. The agent is a prebuilt
+binary; its source is not included in this repository.
 
 ## Run from source
 
