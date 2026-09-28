@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -201,6 +202,47 @@ test('SafeFilesystem mutation methods reject symlink, outside, traversal, and de
     assert.equal(readFileSync(file, 'utf8'), 'content');
   });
 });
+
+test(
+  'SafeFilesystem rejects mutations in a case-twin sibling on case-sensitive APFS',
+  { skip: process.platform !== 'darwin' ? 'requires macOS hdiutil and a case-sensitive APFS image' : undefined },
+  () => {
+    const imageDirectory = mkdtempSync(join(tmpdir(), 'freerdc-case-sensitive-mutation-'));
+    const image = join(imageDirectory, 'case-sensitive.dmg');
+    const mount = join(imageDirectory, 'mount');
+    mkdirSync(mount);
+    try {
+      execFileSync('hdiutil', [
+        'create', '-size', '16m', '-fs', 'Case-sensitive APFS',
+        '-volname', `FreeRdcMutation${process.pid}`, image,
+      ], { stdio: 'ignore' });
+      execFileSync('hdiutil', ['attach', '-nobrowse', '-mountpoint', mount, image], { stdio: 'ignore' });
+
+      const root = join(mount, 'ROOT');
+      const caseTwin = join(mount, 'root');
+      const secret = join(caseTwin, 'secret.txt');
+      mkdirSync(root);
+      mkdirSync(caseTwin);
+      writeFileSync(secret, 'outside');
+
+      const filesystem = new SafeFilesystem({ roots: [root] });
+      expectErrorCode(() => filesystem.write(join(root, '..', 'root', 'secret.txt'), 'overwritten'), E_PATH_ESCAPE);
+      assert.equal(readFileSync(secret, 'utf8'), 'outside');
+
+      const filesystemWithBothRoots = new SafeFilesystem({ roots: [root, caseTwin] });
+      const explicitlyAllowed = join(caseTwin, 'explicitly-allowed.txt');
+      filesystemWithBothRoots.write(explicitlyAllowed, 'allowed');
+      assert.equal(readFileSync(explicitlyAllowed, 'utf8'), 'allowed');
+    } finally {
+      try {
+        execFileSync('hdiutil', ['detach', mount], { stdio: 'ignore' });
+      } catch {
+        // The image may not have attached.
+      }
+      rmSync(imageDirectory, { recursive: true, force: true, maxRetries: 3 });
+    }
+  },
+);
 
 test('SafeFilesystem rejects invalid dry-run values and never creates missing parents', () => {
   inTemporaryDirectory('invalid-options', (directory) => {

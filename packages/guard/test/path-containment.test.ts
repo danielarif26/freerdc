@@ -300,6 +300,32 @@ test("path-containment: containReal accepts real subdirectory", () => {
   }
 });
 
+test(
+  "path-containment: containReal accepts differently cased real children on a case-insensitive volume",
+  { skip: process.platform !== "darwin" ? "requires a macOS case-insensitive default volume" : undefined },
+  (t) => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "freerdc-case-insensitive-"));
+    try {
+      const root = path.join(tmpdir, "root");
+      const child = path.join(root, "Child");
+      fs.mkdirSync(child, { recursive: true });
+      const differentlyCasedChild = path.join(root, "child");
+      if (!fs.existsSync(differentlyCasedChild)) {
+        t.skip("default volume is case-sensitive");
+        return;
+      }
+
+      const result = containReal(root, differentlyCasedChild);
+      assert.ok(result.ok);
+      if (result.ok) {
+        assert.equal(result.path, fs.realpathSync.native(child));
+      }
+    } finally {
+      fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
+  },
+);
+
 test("path-containment: containReal accepts non-existing descendant", () => {
   const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "freerdc-test-"));
   try {

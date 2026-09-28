@@ -151,9 +151,7 @@ export class SafeFilesystem {
         throw deniedError();
       }
 
-      const key = process.platform === 'darwin' || process.platform === 'win32'
-        ? canonicalRoot.toLowerCase()
-        : canonicalRoot;
+      const key = canonicalRoot;
       if (!seen.has(key)) {
         seen.add(key);
         canonicalRoots.push(canonicalRoot);

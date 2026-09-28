@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -263,3 +265,58 @@ test('SafeFilesystem never returns entries whose JSON result exceeds maxOutputBy
     assert.ok(Buffer.byteLength(JSON.stringify(result)) <= requiredBytes);
   });
 });
+
+test(
+  'SafeFilesystem rejects reads from a case-twin sibling on case-sensitive APFS',
+  { skip: process.platform !== 'darwin' ? 'requires macOS hdiutil and a case-sensitive APFS image' : undefined },
+  () => {
+    const imageDirectory = mkdtempSync(join(tmpdir(), 'freerdc-case-sensitive-read-'));
+    const image = join(imageDirectory, 'case-sensitive.dmg');
+    const mount = join(imageDirectory, 'mount');
+    mkdirSync(mount);
+    try {
+      execFileSync('hdiutil', [
+        'create', '-size', '16m', '-fs', 'Case-sensitive APFS',
+        '-volname', `FreeRdcRead${process.pid}`, image,
+      ], { stdio: 'ignore' });
+      execFileSync('hdiutil', ['attach', '-nobrowse', '-mountpoint', mount, image], { stdio: 'ignore' });
+
+      const root = join(mount, 'ROOT');
+      const caseTwin = join(mount, 'root');
+      const secret = join(caseTwin, 'secret.txt');
+      mkdirSync(root);
+      mkdirSync(caseTwin);
+      writeFileSync(secret, 'outside');
+
+      const filesystem = new SafeFilesystem({ roots: [root] });
+      expectErrorCode(() => filesystem.read(join(root, '..', 'root', 'secret.txt')), E_PATH_ESCAPE);
+      assert.equal(readFileSync(secret, 'utf8'), 'outside');
+
+      const filesystemWithBothRoots = new SafeFilesystem({ roots: [root, caseTwin] });
+      assert.equal(filesystemWithBothRoots.read(secret).toString(), 'outside');
+    } finally {
+      try {
+        execFileSync('hdiutil', ['detach', mount], { stdio: 'ignore' });
+      } catch {
+        // The image may not have attached.
+      }
+      rmSync(imageDirectory, { recursive: true, force: true, maxRetries: 3 });
+    }
+  },
+);
+
+test(
+  'SafeFilesystem accepts normal exact-spelling reads on a case-insensitive APFS volume',
+  { skip: process.platform !== 'darwin' ? 'requires a macOS case-insensitive default volume' : undefined },
+  () => {
+    inTemporaryDirectory('case-insensitive-normal-read', (directory) => {
+      const root = join(directory, 'ROOT');
+      const file = join(root, 'child.txt');
+      mkdirSync(root);
+      writeFileSync(file, 'inside');
+
+      const filesystem = new SafeFilesystem({ roots: [root] });
+      assert.equal(filesystem.read(file).toString(), 'inside');
+    });
+  },
+);

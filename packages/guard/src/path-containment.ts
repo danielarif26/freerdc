@@ -152,65 +152,29 @@ export function isUnsafeFilesystemRoot(root: string): boolean {
 export function containLexical(root: string, candidate: string): ContainmentResult {
   const normRoot = normalize(root);
   const normCand = normalize(candidate);
-  const sep = path.sep;
-
-  if (isCaseInsensitive()) {
-    const rootLower = normRoot.toLowerCase();
-    const candLower = normCand.toLowerCase();
-
-    // Root equality allowed
-    if (candLower === rootLower) {
-      return { ok: true, path: normCand };
-    }
-    // Child allowed iff candidate starts with normalizedRoot + path.sep
-    const rootPrefix = rootLower.endsWith(sep) ? rootLower : rootLower + sep;
-    if (candLower.startsWith(rootPrefix)) {
-      return { ok: true, path: normCand };
-    }
-    // Distinguish escape from boundary: if normalized candidate looks like parent, it's escape
-    if (rootLower.startsWith(candLower)) {
-      return { ok: false, error: "E_PATH_ESCAPE" };
-    }
-    return { ok: false, error: "E_PATH_ESCAPE" };
-  } else {
-    if (normCand === normRoot) {
-      return { ok: true, path: normCand };
-    }
-    const rootPrefix = normRoot.endsWith(sep) ? normRoot : normRoot + sep;
-    if (normCand.startsWith(rootPrefix)) {
-      return { ok: true, path: normCand };
-    }
-    if (normRoot.startsWith(normCand)) {
-      return { ok: false, error: "E_PATH_ESCAPE" };
-    }
-    return { ok: false, error: "E_PATH_ESCAPE" };
-  }
+  return isSameOrDescendant(normCand, normRoot)
+    ? { ok: true, path: normCand }
+    : { ok: false, error: "E_PATH_ESCAPE" };
 }
 
 export function containReal(root: string, candidate: string): ContainmentResult {
-  // Lexical check first
-  const lexical = containLexical(root, candidate);
-  if (!lexical.ok) return lexical;
-
-  // Root must resolve to its REAL path
   let realRoot: string;
   try {
-    realRoot = normalize(fs.realpathSync(root));
+    realRoot = normalize(fs.realpathSync.native(root));
   } catch {
     // If root doesn't exist, can't validate real containment
     return { ok: false, error: "E_PATH_ESCAPE" };
   }
 
   // Find deepest existing candidate/ancestor INCLUDING candidate itself
-  let current = candidate;
+  const normalizedCandidate = normalize(candidate);
+  let current = normalizedCandidate;
   let deepestExisting = "";
 
-  // Check candidate first
   if (fs.existsSync(current)) {
     deepestExisting = current;
   } else {
-    // Walk up to find deepest existing ancestor
-    current = path.dirname(candidate);
+    current = path.dirname(normalizedCandidate);
     while (current !== path.dirname(current)) {
       if (fs.existsSync(current)) {
         deepestExisting = current;
@@ -218,7 +182,6 @@ export function containReal(root: string, candidate: string): ContainmentResult 
       }
       current = path.dirname(current);
     }
-    // If still not found, use root of filesystem
     if (!deepestExisting) {
       deepestExisting = current;
     }
@@ -227,25 +190,31 @@ export function containReal(root: string, candidate: string): ContainmentResult 
   // Realpath that ancestor
   let realAncestor: string;
   try {
-    realAncestor = normalize(fs.realpathSync(deepestExisting));
+    realAncestor = normalize(fs.realpathSync.native(deepestExisting));
   } catch {
     return { ok: false, error: "E_PATH_ESCAPE" };
   }
 
-  // Append only the unresolved relative suffix
-  const relativeSuffix = path.relative(deepestExisting, candidate);
-  const resolvedCandidate = relativeSuffix
-    ? path.join(realAncestor, relativeSuffix)
-    : realAncestor;
+  const relativeSuffix = path.relative(deepestExisting, normalizedCandidate);
+  const resolvedCandidate = relativeSuffix === ""
+    ? realAncestor
+    : normalize(path.join(realAncestor, relativeSuffix));
 
-  // Compare against REAL root
-  return containLexical(realRoot, resolvedCandidate);
+  return isSameOrDescendant(resolvedCandidate, realRoot)
+    ? { ok: true, path: resolvedCandidate }
+    : { ok: false, error: "E_PATH_ESCAPE" };
+}
+
+function isSameOrDescendant(candidate: string, ancestor: string): boolean {
+  const pathFromAncestor = path.relative(ancestor, candidate);
+  return pathFromAncestor === ""
+    || (pathFromAncestor !== ".." && !pathFromAncestor.startsWith(`..${path.sep}`) && !path.isAbsolute(pathFromAncestor));
 }
 
 function comparisonPaths(candidate: string): readonly string[] {
   const paths = new Set<string>([normalize(candidate)]);
   try {
-    paths.add(normalize(fs.realpathSync(candidate)));
+    paths.add(normalize(fs.realpathSync.native(candidate)));
   } catch {
     // Non-existent paths are still checked lexically. checkPath() performs a
     // second denylist comparison after resolving the deepest existing ancestor.

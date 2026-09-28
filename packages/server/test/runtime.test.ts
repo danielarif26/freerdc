@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -109,6 +109,64 @@ test('runtime rejects custom state directories that overlap configured roots', a
     rmSync(parent, { recursive: true, force: true, maxRetries: 3 });
   }
 });
+
+test(
+  'runtime rejects a differently-cased root that contains the state directory on a case-insensitive volume',
+  { skip: process.platform !== 'darwin' ? 'requires a macOS case-insensitive default volume' : undefined },
+  (t) => {
+    const parent = mkdtempSync(join(tmpdir(), 'freerdc-case-insensitive-runtime-'));
+    try {
+      const root = join(parent, 'Root');
+      const stateDir = join(root, 'state');
+      mkdirSync(stateDir, { recursive: true });
+      const differentlyCasedRoot = join(parent, 'root');
+      if (!existsSync(differentlyCasedRoot)) {
+        t.skip('default volume is case-sensitive');
+        return;
+      }
+
+      assert.throws(
+        () => createFreeRdcRuntime({ roots: [differentlyCasedRoot], stateDir }),
+        /stateDir must not overlap a filesystem root/,
+      );
+    } finally {
+      rmSync(parent, { recursive: true, force: true, maxRetries: 3 });
+    }
+  },
+);
+
+test(
+  'runtime permits case-twin root and state directories on case-sensitive APFS',
+  { skip: process.platform !== 'darwin' ? 'requires macOS hdiutil and a case-sensitive APFS image' : undefined },
+  async () => {
+    const imageDirectory = mkdtempSync(join(tmpdir(), 'freerdc-case-sensitive-runtime-'));
+    const image = join(imageDirectory, 'case-sensitive.dmg');
+    const mount = join(imageDirectory, 'mount');
+    mkdirSync(mount);
+    try {
+      execFileSync('hdiutil', [
+        'create', '-size', '16m', '-fs', 'Case-sensitive APFS',
+        '-volname', `FreeRdcRuntime${process.pid}`, image,
+      ], { stdio: 'ignore' });
+      execFileSync('hdiutil', ['attach', '-nobrowse', '-mountpoint', mount, image], { stdio: 'ignore' });
+
+      const root = join(mount, 'root');
+      const stateDir = join(mount, 'ROOT');
+      mkdirSync(root);
+      mkdirSync(stateDir);
+
+      const runtime = createFreeRdcRuntime({ roots: [root], stateDir, port: 0 });
+      await runtime.close();
+    } finally {
+      try {
+        execFileSync('hdiutil', ['detach', mount], { stdio: 'ignore' });
+      } catch {
+        // The image may not have attached.
+      }
+      rmSync(imageDirectory, { recursive: true, force: true, maxRetries: 3 });
+    }
+  },
+);
 
 test('runtime can privately initialize its default state while filesystem policy denies it', () => {
   const temporaryHome = mkdtempSync(join(tmpdir(), 'freerdc-runtime-home-'));

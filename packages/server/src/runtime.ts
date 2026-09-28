@@ -1,6 +1,6 @@
 import { closeSync, constants as fsConstants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import {
   DEFAULT_AGENT_LIMITS,
@@ -149,30 +149,32 @@ function overlapsFilesystemRoot(stateDir: string, parent: string, roots: readonl
   // The parent has passed the non-symlink lstat check above. Resolving it also
   // catches a configured root that reaches the state directory through an
   // ancestor symlink, including before a new state directory is created.
-  const statePaths = [stateDir, resolve(join(realpathSync(parent), basename(stateDir)))];
-  return roots.some((root) => rootComparisonPaths(root).some((rootPath) => (
-    statePaths.some((statePath) => pathsOverlap(statePath, rootPath))
-  )));
+  const statePath = canonicalPath(stateDir, parent);
+  return roots.some((root) => pathsOverlap(statePath, canonicalPath(root)));
 }
 
-function rootComparisonPaths(root: string): readonly string[] {
+function canonicalPath(candidate: string, knownExistingAncestor?: string): string {
+  const resolvedCandidate = resolve(candidate);
+  let existing = knownExistingAncestor === undefined ? resolvedCandidate : resolve(knownExistingAncestor);
   try {
-    return [root, resolve(realpathSync(root))];
+    while (true) {
+      try {
+        const realAncestor = realpathSync.native(existing);
+        const suffix = relative(existing, resolvedCandidate);
+        return suffix === '' ? realAncestor : resolve(join(realAncestor, suffix));
+      } catch {
+        const parent = dirname(existing);
+        if (parent === existing) return resolvedCandidate;
+        existing = parent;
+      }
+    }
   } catch {
-    // SafeFilesystem reports invalid roots separately. The resolved lexical
-    // root remains sufficient for overlap checks before that validation.
-    return [root];
+    return resolvedCandidate;
   }
 }
 
 function isSameOrDescendant(candidate: string, ancestor: string): boolean {
-  const comparisonCandidate = isCaseInsensitivePathPlatform() ? candidate.toLowerCase() : candidate;
-  const comparisonAncestor = isCaseInsensitivePathPlatform() ? ancestor.toLowerCase() : ancestor;
-  const pathFromAncestor = relative(comparisonAncestor, comparisonCandidate);
+  const pathFromAncestor = relative(ancestor, candidate);
   return pathFromAncestor === ''
     || (pathFromAncestor !== '..' && !pathFromAncestor.startsWith(`..${sep}`) && !isAbsolute(pathFromAncestor));
-}
-
-function isCaseInsensitivePathPlatform(): boolean {
-  return process.platform === 'darwin' || process.platform === 'win32';
 }
