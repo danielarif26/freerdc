@@ -19,6 +19,14 @@ export const RPC_METHODS = Object.freeze([
 
 export type RpcMethod = (typeof RPC_METHODS)[number];
 
+/** Maximum serialized WebSocket wire frame accepted by either peer. */
+export const WIRE_MAX_FRAME_BYTES = 262_144;
+/** Leave room for the envelope and RPC metadata around a serialized payload. */
+const WIRE_PAYLOAD_HEADROOM_BYTES = 16_384;
+export const WIRE_MAX_PAYLOAD_BYTES = WIRE_MAX_FRAME_BYTES - WIRE_PAYLOAD_HEADROOM_BYTES;
+export const WIRE_MAX_STRING_LENGTH = 4_096;
+export const WIRE_MAX_ARG_COUNT = 128;
+
 export function isRpcMethod(value: unknown): value is RpcMethod {
   return typeof value === "string" && (RPC_METHODS as readonly string[]).includes(value);
 }
@@ -36,10 +44,22 @@ export function isCanonicalUtf8(value: string): boolean {
 export const WireBytes = z
   .object({
     encoding: z.enum(["utf8", "base64"]),
-    data: z.string(),
+    data: z.string().max(WIRE_MAX_PAYLOAD_BYTES),
   })
   .strict()
   .superRefine((value, ctx) => {
+    // A character limit alone is insufficient for multi-byte UTF-8 or JSON
+    // escaping. Keep the encoded WireBytes object below the payload budget so
+    // the frame envelope still has bounded room on either transport.
+    if (Buffer.byteLength(JSON.stringify(value), "utf8") > WIRE_MAX_PAYLOAD_BYTES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.too_big,
+        maximum: WIRE_MAX_PAYLOAD_BYTES,
+        type: "string",
+        inclusive: true,
+        path: ["data"],
+      });
+    }
     if (value.encoding === "base64" && !isCanonicalBase64(value.data)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -56,9 +76,9 @@ export const WireBytes = z
 
 export type WireBytes = z.infer<typeof WireBytes>;
 
-const nonemptyString = z.string().min(1);
+const nonemptyString = z.string().min(1).max(WIRE_MAX_STRING_LENGTH);
 const sha256 = z.string().regex(/^[0-9a-fA-F]{64}$/);
-const absolutePath = z.string().min(1).refine((s) => s.startsWith("/"), {
+const absolutePath = z.string().min(1).max(WIRE_MAX_STRING_LENGTH).refine((s) => s.startsWith("/"), {
   message: "executable must be an absolute path",
 });
 const dryRun = z.enum(["off", "plan"]).default("off");
@@ -108,7 +128,7 @@ export const RPC_PARAM_SCHEMAS: Readonly<Record<RpcMethod, z.ZodTypeAny>> = Obje
   "proc.start": z
     .object({
       executable: absolutePath,
-      argv: z.array(z.string()).default([]),
+      argv: z.array(z.string().max(WIRE_MAX_STRING_LENGTH)).max(WIRE_MAX_ARG_COUNT).default([]),
       cwd: nonemptyString.optional(),
       timeoutMs: z.number().int().positive().optional(),
       dryRun,

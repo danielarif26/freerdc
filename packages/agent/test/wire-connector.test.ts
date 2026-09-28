@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import { WIRE_ID } from '@freerdc/protocol';
+import { E_TOO_LARGE, WIRE_ID, WIRE_MAX_FRAME_BYTES } from '@freerdc/protocol';
 import { WebSocket } from 'ws';
 
 import {
@@ -331,6 +331,59 @@ test('sendRpcResult after ready sends exact rpc.res frame with matching requestI
     result: { ok: true },
   });
   connector.close();
+});
+
+test('oversized rpc result sends a sanitized E_TOO_LARGE error and preserves the ready connection', async () => {
+  const pair = generateKeyPairSync('ed25519');
+  const socket = new FakeSocket();
+  const connector = new WireConnector({
+    endpoint: 'ws://127.0.0.1:8787/agent',
+    deviceId: 'device-1',
+    signer: createEd25519Signer(pair.privateKey),
+    webSocketFactory: openFactory(socket),
+  });
+  await connectUntilReady(connector, socket);
+
+  const before = socket.sent.length;
+  connector.sendRpcResult('request-too-large', { data: 'x'.repeat(WIRE_MAX_FRAME_BYTES) });
+  assert.equal(socket.sent.length, before + 1);
+  assert.equal(connector.isReady, true);
+  assert.equal(socket.readyState, WebSocket.OPEN);
+  const oversizedError = JSON.parse(socket.sent[before] ?? '{}') as {
+    kind?: string;
+    payload?: unknown;
+  };
+  assert.equal(oversizedError.kind, 'rpc.err');
+  assert.deepEqual(oversizedError.payload, {
+    type: 'rpc.err',
+    requestId: 'request-too-large',
+    error: { code: E_TOO_LARGE },
+  });
+
+  connector.sendRpcResult('request-normal', { ok: true });
+  assert.equal(socket.sent.length, before + 2);
+  assert.equal(JSON.parse(socket.sent[before + 1] ?? '{}').kind, 'rpc.res');
+  assert.equal(connector.isReady, true);
+  connector.close();
+});
+
+test('backpressure includes the serialized frame bytes before sending', async () => {
+  const pair = generateKeyPairSync('ed25519');
+  const socket = new FakeSocket();
+  const connector = new WireConnector({
+    endpoint: 'ws://127.0.0.1:8787/agent',
+    deviceId: 'device-1',
+    signer: createEd25519Signer(pair.privateKey),
+    webSocketFactory: openFactory(socket),
+  });
+  await connectUntilReady(connector, socket);
+
+  socket.bufferedAmount = 1_048_576;
+  const before = socket.sent.length;
+  assert.throws(() => connector.sendRpcResult('request-1', { ok: true }), /backpressure limit exceeded/);
+  assert.equal(socket.sent.length, before);
+  assert.equal(socket.closeCode, 1013);
+  assert.equal(connector.isReady, false);
 });
 
 test('sendRpcError after ready sends exact rpc.err frame with matching requestId and code only', async () => {

@@ -6,12 +6,13 @@ import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
 
 import { createEd25519Signer, createRpcEnabledWireConnector, SafeFilesystem, ProcessManager, InMemoryStateProvider } from '@freerdc/agent';
-import { E_PATH_ESCAPE, E_KILLSWITCH, FreeRdcError } from '@freerdc/protocol';
+import { E_PATH_ESCAPE, E_KILLSWITCH, E_TOO_LARGE, FreeRdcError, WIRE_MAX_FRAME_BYTES } from '@freerdc/protocol';
 import { McpServer } from '@modelcontextprotocol/server';
 
 import { DeviceRegistry } from '../src/device-registry.js';
 import { createMcpHttpHost } from '../src/http-host.js';
 import { WireHub } from '../src/wire-hub.js';
+import { BACKPRESSURE_CLOSE_CODE, WireWsTransport } from '../src/wire-ws-transport.js';
 
 type WireBytes = { encoding: 'utf8' | 'base64'; data: string };
 
@@ -49,6 +50,37 @@ function fixture() {
   const host = createMcpHttpHost(() => new McpServer({ name: 'test-server', version: '0.0.0' }), 0, { hub });
   return { pair, registry, hub, host, root, outsideRoot, filesystem, processManager, stateProvider, realNode };
 }
+
+test('server sender enforces the exact frame cap and accounts queued frame bytes', () => {
+  const sent: string[] = [];
+  const closes: Array<number | undefined> = [];
+  const transport = new WireWsTransport({
+    readyState: 1,
+    bufferedAmount: 0,
+    send: (data) => sent.push(data),
+    close: (code) => closes.push(code),
+  });
+
+  transport.send('x'.repeat(WIRE_MAX_FRAME_BYTES - 2));
+  assert.equal(Buffer.byteLength(sent[0] ?? '', 'utf8'), WIRE_MAX_FRAME_BYTES);
+  assert.throws(
+    () => transport.send('x'.repeat(WIRE_MAX_FRAME_BYTES - 1)),
+    (error: unknown) => error instanceof FreeRdcError && error.code === E_TOO_LARGE,
+  );
+  transport.send({ ok: true });
+  assert.equal(sent.length, 2);
+  assert.deepEqual(closes, []);
+
+  const pressureCloses: Array<number | undefined> = [];
+  const pressureTransport = new WireWsTransport({
+    readyState: 1,
+    bufferedAmount: 150,
+    send: () => assert.fail('backpressured frame must not be sent'),
+    close: (code) => pressureCloses.push(code),
+  }, { bufferedAmountCeiling: 200 });
+  assert.throws(() => pressureTransport.send({ payload: 'x'.repeat(64) }), /backpressure limit exceeded/);
+  assert.deepEqual(pressureCloses, [BACKPRESSURE_CLOSE_CODE]);
+});
 
 test('filesystem/auth/security/kill-switch', async () => {
   const { pair, registry, hub, host, root, outsideRoot, filesystem, stateProvider } = fixture();
@@ -107,6 +139,76 @@ test('filesystem/auth/security/kill-switch', async () => {
     const fsStat = statSync(textPath);
     assert.equal(statResult.type, 'file');
     assert.equal(statResult.size, fsStat.size);
+  } finally {
+    stateProvider.setActive(false);
+    connector?.close();
+    await host.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('oversized authenticated request is rejected without dropping the device connection', async () => {
+  const { pair, registry, hub, host, root, filesystem, stateProvider } = fixture();
+  let connector: ReturnType<typeof createRpcEnabledWireConnector>['connector'] | undefined;
+  try {
+    const { port } = await host.start();
+    ({ connector } = createRpcEnabledWireConnector({
+      endpoint: `ws://127.0.0.1:${port}/agent`,
+      deviceId: 'device-1',
+      capabilities: ['fs.v1'],
+      signer: createEd25519Signer(pair.privateKey),
+      rpc: { filesystem },
+    }));
+    await connector.connect();
+
+    await assert.rejects(
+      hub.request('device-1', 'fs.write', {
+        path: join(root, 'oversized.txt'),
+        content: { encoding: 'utf8', data: 'x'.repeat(300_000) },
+      }),
+      (error: unknown) => error instanceof FreeRdcError && error.code === E_TOO_LARGE,
+    );
+    assert.equal(registry.get('device-1')?.status, 'online');
+    assert.equal(connector.isReady, true);
+
+    const normalResult = await hub.request('device-1', 'fs.stat', { path: root }) as { type: string };
+    assert.equal(normalResult.type, 'directory');
+    assert.equal(registry.get('device-1')?.status, 'online');
+    assert.equal(connector.isReady, true);
+  } finally {
+    stateProvider.setActive(false);
+    connector?.close();
+    await host.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('oversized authenticated response is rejected without dropping the device connection', async () => {
+  const { pair, registry, hub, host, root, filesystem, stateProvider } = fixture();
+  let connector: ReturnType<typeof createRpcEnabledWireConnector>['connector'] | undefined;
+  try {
+    writeFileSync(join(root, 'oversized.bin'), Buffer.alloc(200_000, 0xff));
+    const { port } = await host.start();
+    ({ connector } = createRpcEnabledWireConnector({
+      endpoint: `ws://127.0.0.1:${port}/agent`,
+      deviceId: 'device-1',
+      capabilities: ['fs.v1'],
+      signer: createEd25519Signer(pair.privateKey),
+      rpc: { filesystem },
+    }));
+    await connector.connect();
+
+    await assert.rejects(
+      hub.request('device-1', 'fs.read', { path: join(root, 'oversized.bin') }),
+      (error: unknown) => error instanceof FreeRdcError && error.code === E_TOO_LARGE,
+    );
+    assert.equal(registry.get('device-1')?.status, 'online');
+    assert.equal(connector.isReady, true);
+
+    const normalResult = await hub.request('device-1', 'fs.stat', { path: root }) as { type: string };
+    assert.equal(normalResult.type, 'directory');
+    assert.equal(registry.get('device-1')?.status, 'online');
+    assert.equal(connector.isReady, true);
   } finally {
     stateProvider.setActive(false);
     connector?.close();

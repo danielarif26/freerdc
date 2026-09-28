@@ -2,14 +2,17 @@ import { randomUUID } from 'node:crypto';
 
 import {
   buildAgentAuthTranscript,
+  E_TOO_LARGE,
+  FreeRdcError,
   parseEnvelope,
   WIRE_ID,
+  WIRE_MAX_FRAME_BYTES,
   WIRE_VERSION,
   type ParsedEnvelope,
 } from '@freerdc/protocol';
 import { WebSocket, type ClientOptions, type RawData } from 'ws';
 
-export const WIRE_WS_MAX_PAYLOAD = 262_144;
+export const WIRE_WS_MAX_PAYLOAD = WIRE_MAX_FRAME_BYTES;
 export const DEFAULT_BUFFERED_AMOUNT_CEILING = 1_048_576;
 export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
 export const BACKPRESSURE_CLOSE_CODE = 1013;
@@ -193,7 +196,15 @@ export class WireConnector {
     if (!this.isReady) {
       throw new Error('WireConnector is not ready');
     }
-    this.sendFrame('rpc.res', { type: 'rpc.res', requestId, result });
+    try {
+      this.sendFrame('rpc.res', { type: 'rpc.res', requestId, result });
+    } catch (error) {
+      if (error instanceof FreeRdcError && error.code === E_TOO_LARGE) {
+        this.sendFrame('rpc.err', { type: 'rpc.err', requestId, error: { code: E_TOO_LARGE } });
+        return;
+      }
+      throw error;
+    }
   }
 
   sendRpcError(requestId: string, error: { code: string }): void {
@@ -298,17 +309,22 @@ export class WireConnector {
     if (socket === undefined || socket.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket is not open');
     }
-    if (socket.bufferedAmount > this.ceiling) {
-      try { socket.close(BACKPRESSURE_CLOSE_CODE); } catch { /* ignore */ }
-      throw new Error('WebSocket backpressure limit exceeded');
-    }
-    socket.send(JSON.stringify({
+    const serialized = JSON.stringify({
       v: ENVELOPE_VERSION,
       id: randomUUID(),
       kind,
       ts: Date.now(),
       payload,
-    }));
+    });
+    const frameBytes = Buffer.byteLength(serialized, 'utf8');
+    if (frameBytes > WIRE_MAX_FRAME_BYTES) {
+      throw new FreeRdcError(E_TOO_LARGE);
+    }
+    if (socket.bufferedAmount + frameBytes > this.ceiling) {
+      try { socket.close(BACKPRESSURE_CLOSE_CODE); } catch { /* ignore */ }
+      throw new Error('WebSocket backpressure limit exceeded');
+    }
+    socket.send(serialized);
   }
 
   private fail(error: Error): void {

@@ -12,6 +12,7 @@ import {
   E_DEVICE_OFFLINE,
   E_INTERNAL,
   E_TIMEOUT,
+  E_TOO_LARGE,
   FreeRdcError,
 } from '@freerdc/protocol';
 
@@ -143,7 +144,11 @@ export class WireHub {
         this.send(session, 'rpc.req', params === undefined
           ? { type: 'rpc.req', requestId, method }
           : { type: 'rpc.req', requestId, method, params });
-      } catch {
+      } catch (error) {
+        if (error instanceof FreeRdcError && error.code === E_TOO_LARGE) {
+          this.rejectPending(session, requestId, E_TOO_LARGE);
+          return;
+        }
         this.fail(session);
       }
     });

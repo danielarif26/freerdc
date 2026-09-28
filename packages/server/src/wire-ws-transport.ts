@@ -1,6 +1,8 @@
+import { E_TOO_LARGE, FreeRdcError, WIRE_MAX_FRAME_BYTES } from '@freerdc/protocol';
+
 import { WireTransport } from './wire-hub.js';
 
-export const WIRE_WS_MAX_PAYLOAD = 262_144;
+export const WIRE_WS_MAX_PAYLOAD = WIRE_MAX_FRAME_BYTES;
 export const DEFAULT_BUFFERED_AMOUNT_CEILING = 1_048_576;
 export const BACKPRESSURE_CLOSE_CODE = 1013;
 const DEFAULT_OPEN_STATE = 1;
@@ -60,7 +62,11 @@ export class WireWsTransport extends WireTransport {
     } catch (error) {
       throw error instanceof Error ? error : new Error('WebSocket frame serialization failed');
     }
-    if (this.socket.bufferedAmount > this.ceiling) {
+    const serializedByteLength = Buffer.byteLength(serialized, 'utf8');
+    if (serializedByteLength > WIRE_WS_MAX_PAYLOAD) {
+      throw new FreeRdcError(E_TOO_LARGE);
+    }
+    if (this.socket.bufferedAmount + serializedByteLength > this.ceiling) {
       this.close(BACKPRESSURE_CLOSE_CODE);
       throw new Error('WebSocket backpressure limit exceeded');
     }

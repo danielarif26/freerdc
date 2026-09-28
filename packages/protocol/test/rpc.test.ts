@@ -4,6 +4,10 @@ import {
   RPC_METHODS,
   RPC_PARAM_SCHEMAS,
   WireBytes,
+  WIRE_MAX_ARG_COUNT,
+  WIRE_MAX_FRAME_BYTES,
+  WIRE_MAX_PAYLOAD_BYTES,
+  WIRE_MAX_STRING_LENGTH,
   isCanonicalBase64,
   isCanonicalUtf8,
   isRpcMethod,
@@ -207,6 +211,37 @@ test("canonical base64 validator and WireBytes reject unpadded aliases", () => {
     }),
     FreeRdcError,
   );
+});
+
+test("WireBytes enforces the bounded encoded payload budget", () => {
+  assert.equal(WIRE_MAX_FRAME_BYTES, 262_144);
+  assert.equal(WireBytes.safeParse({ encoding: "utf8", data: "x".repeat(WIRE_MAX_PAYLOAD_BYTES - 64) }).success, true);
+  assert.equal(WireBytes.safeParse({ encoding: "utf8", data: "x".repeat(WIRE_MAX_PAYLOAD_BYTES + 1) }).success, false);
+  assert.equal(WireBytes.safeParse({ encoding: "base64", data: "A".repeat(WIRE_MAX_PAYLOAD_BYTES + 1) }).success, false);
+  assert.equal(WireBytes.safeParse({ encoding: "utf8", data: "é".repeat(Math.ceil(WIRE_MAX_PAYLOAD_BYTES / 2)) }).success, false);
+});
+
+test("RPC payload strings and argv are explicitly bounded", () => {
+  assert.equal(RPC_PARAM_SCHEMAS["fs.search"].safeParse({
+    path: "/tmp",
+    query: "q".repeat(WIRE_MAX_STRING_LENGTH),
+  }).success, true);
+  assert.equal(RPC_PARAM_SCHEMAS["fs.search"].safeParse({
+    path: "/tmp",
+    query: "q".repeat(WIRE_MAX_STRING_LENGTH + 1),
+  }).success, false);
+  assert.equal(RPC_PARAM_SCHEMAS["proc.start"].safeParse({
+    executable: "/bin/echo",
+    argv: Array.from({ length: WIRE_MAX_ARG_COUNT }, () => "a"),
+  }).success, true);
+  assert.equal(RPC_PARAM_SCHEMAS["proc.start"].safeParse({
+    executable: "/bin/echo",
+    argv: Array.from({ length: WIRE_MAX_ARG_COUNT + 1 }, () => "a"),
+  }).success, false);
+  assert.equal(RPC_PARAM_SCHEMAS["proc.start"].safeParse({
+    executable: "/bin/echo",
+    argv: ["a".repeat(WIRE_MAX_STRING_LENGTH + 1)],
+  }).success, false);
 });
 
 test("canonical utf8 validator and WireBytes accept valid UTF-8 and reject lone surrogates", () => {
