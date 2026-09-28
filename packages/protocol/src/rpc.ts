@@ -25,6 +25,7 @@ export const WIRE_MAX_FRAME_BYTES = 262_144;
 const WIRE_PAYLOAD_HEADROOM_BYTES = 16_384;
 export const WIRE_MAX_PAYLOAD_BYTES = WIRE_MAX_FRAME_BYTES - WIRE_PAYLOAD_HEADROOM_BYTES;
 export const WIRE_MAX_STRING_LENGTH = 4_096;
+export const WIRE_MAX_ARG_LENGTH = 65_536;
 export const WIRE_MAX_ARG_COUNT = 128;
 
 export function isRpcMethod(value: unknown): value is RpcMethod {
@@ -128,7 +129,7 @@ export const RPC_PARAM_SCHEMAS: Readonly<Record<RpcMethod, z.ZodTypeAny>> = Obje
   "proc.start": z
     .object({
       executable: absolutePath,
-      argv: z.array(z.string().max(WIRE_MAX_STRING_LENGTH)).max(WIRE_MAX_ARG_COUNT).default([]),
+      argv: z.array(z.string().max(WIRE_MAX_ARG_LENGTH)).max(WIRE_MAX_ARG_COUNT).default([]),
       cwd: nonemptyString.optional(),
       timeoutMs: z.number().int().positive().optional(),
       dryRun,

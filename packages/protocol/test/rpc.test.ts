@@ -4,6 +4,7 @@ import {
   RPC_METHODS,
   RPC_PARAM_SCHEMAS,
   WireBytes,
+  WIRE_MAX_ARG_LENGTH,
   WIRE_MAX_ARG_COUNT,
   WIRE_MAX_FRAME_BYTES,
   WIRE_MAX_PAYLOAD_BYTES,
@@ -240,7 +241,12 @@ test("RPC payload strings and argv are explicitly bounded", () => {
   }).success, false);
   assert.equal(RPC_PARAM_SCHEMAS["proc.start"].safeParse({
     executable: "/bin/echo",
-    argv: ["a".repeat(WIRE_MAX_STRING_LENGTH + 1)],
+    argv: ["-lc", "a".repeat(60_000)],
+  }).success, true);
+  assert.equal(WIRE_MAX_ARG_LENGTH, 65_536);
+  assert.equal(RPC_PARAM_SCHEMAS["proc.start"].safeParse({
+    executable: "/bin/echo",
+    argv: ["-lc", "a".repeat(WIRE_MAX_ARG_LENGTH + 1)],
   }).success, false);
 });
 
