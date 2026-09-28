@@ -13,6 +13,7 @@ import {
   type CommandPlan,
   type CommandPolicy,
   type CommandRule,
+  type StateProvider,
 } from '../src/index.js';
 
 const NODE = realpathSync(process.execPath);
@@ -60,6 +61,15 @@ async function waitForExit(manager: ProcessManager, id: string): Promise<void> {
   await waitFor(() => manager.list().some((item) => item.id === id && item.status === 'exited'), `process ${id} did not exit`);
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    return !(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH');
+  }
+}
+
 async function withManager(
   options: Omit<ConstructorParameters<typeof ProcessManager>[0], 'roots'>,
   body: (manager: ProcessManager, root: string) => Promise<void>,
@@ -69,7 +79,7 @@ async function withManager(
   try {
     await body(manager, root);
   } finally {
-    manager.killAll(true);
+    manager.close();
     await waitFor(() => manager.list().every((item) => item.status === 'exited'), 'child cleanup did not finish');
     rmSync(root, { recursive: true, force: true, maxRetries: 3 });
   }
@@ -174,6 +184,72 @@ test('the kill switch blocks start and input, including activation after a child
     await rejectedCode(manager.start(nodePlan('process.exit(0)')), E_KILLSWITCH);
     errorCode(() => manager.input(child.id, 'no'), E_KILLSWITCH);
   });
+});
+
+test('the kill switch terminates an already-running child and its descendant without another manager call', async () => {
+  const state = new InMemoryStateProvider();
+  let descendantPid: number | undefined;
+  try {
+    await withManager({ policy: allowNode(), stateProvider: state }, async (manager) => {
+      const child = await manager.start(nodePlan([
+        "const { spawn } = require('node:child_process');",
+        "const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
+        'process.stdout.write(String(descendant.pid));',
+        'setInterval(() => {}, 1000);',
+      ].join(' ')));
+      await waitFor(() => manager.peek(child.id)?.stdout.byteLength !== 0, 'child did not report its descendant PID');
+      descendantPid = Number(manager.read(child.id)?.stdout.toString());
+      assert.ok(Number.isSafeInteger(descendantPid));
+      assert.equal(isProcessAlive(descendantPid), true);
+
+      state.setActive(true);
+
+      await waitForExit(manager, child.id);
+      await waitFor(() => !isProcessAlive(descendantPid!), `descendant ${descendantPid} did not exit after STOP`, 1_000);
+    });
+  } finally {
+    // The pre-fix assertion intentionally fails while the direct child is
+    // still running. Do not leave its grandchild behind during that failure.
+    if (descendantPid !== undefined && isProcessAlive(descendantPid)) {
+      try {
+        process.kill(descendantPid, 'SIGKILL');
+      } catch {
+        // The process group may have exited between the liveness check and
+        // cleanup; that is already the desired state.
+      }
+    }
+  }
+});
+
+test('close stops STOP monitoring after terminating running children and fails closed', async () => {
+  const state = {
+    calls: 0,
+    isActive(): boolean {
+      this.calls += 1;
+      return false;
+    },
+  } satisfies StateProvider & { calls: number };
+  const root = temporaryDirectory();
+  const manager = new ProcessManager({ policy: allowNode(), roots: [root], stateProvider: state });
+  try {
+    const child = await manager.start(nodePlan('setInterval(() => {}, 1000);'));
+    const callsAfterStart = state.calls;
+    await waitFor(() => state.calls > callsAfterStart, 'STOP monitoring did not poll while the child was running');
+
+    manager.close();
+    await waitForExit(manager, child.id);
+    const callsAfterClose = state.calls;
+    // This is more than two polling intervals. A stale watcher would call the
+    // state provider again even after all sessions have ended.
+    await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    assert.equal(state.calls, callsAfterClose);
+    await rejectedCode(manager.start(nodePlan('process.exit(0)')), E_KILLSWITCH);
+    assert.equal(state.calls, callsAfterClose);
+  } finally {
+    manager.close();
+    await waitFor(() => manager.list().every((item) => item.status === 'exited'), 'child cleanup did not finish');
+    rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  }
 });
 
 test('dryRun plan is side-effect-free and returns a planned result', async () => {

@@ -72,6 +72,7 @@ interface Session {
 }
 
 const TERMINATION_GRACE_MS = 50;
+const KILL_SWITCH_POLL_MS = 25;
 const DEFAULT_MAX_SESSIONS = 128;
 
 /**
@@ -89,6 +90,8 @@ export class ProcessManager {
   readonly #sessions = new Map<string, Session>();
   readonly #maxSessions: number;
   #pendingStarts = 0;
+  #killSwitchMonitor: NodeJS.Timeout | undefined;
+  #stopped = false;
 
   constructor(options: ProcessManagerOptions) {
     const maxWriteBytes = commandLimit(options.limits?.maxWriteBytes, DEFAULT_AGENT_LIMITS.maxWriteBytes);
@@ -143,6 +146,7 @@ export class ProcessManager {
       const child = spawn(current.plan.executable, [...current.plan.argv], {
         cwd: current.cwd,
         env: scrubEnv(this.#baseEnv),
+        detached: process.platform !== 'win32',
         shell: false,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -172,6 +176,7 @@ export class ProcessManager {
       this.#pendingStarts -= 1;
       reserved = false;
       this.#attach(session, current.timeoutMs);
+      this.#startKillSwitchMonitor();
       if (options.signal !== undefined) {
         const onAbort = () => this.#cancelStartedSession(session);
         session.abortListener = onAbort;
@@ -180,6 +185,7 @@ export class ProcessManager {
       try {
         await this.#waitForSpawn(session, options.signal);
         if (options.signal?.aborted) throw new FreeRdcError(E_CMD_DENIED, { reason: 'cancelled' });
+        this.#assertActive();
       } catch (error) {
         this.#cancelStartedSession(session);
         if (error instanceof FreeRdcError) throw error;
@@ -278,6 +284,14 @@ export class ProcessManager {
     if (session === undefined || session.status !== 'running') {
       return false;
     }
+    if (process.platform !== 'win32' && session.child.pid !== undefined) {
+      try {
+        process.kill(-session.child.pid, force ? 'SIGKILL' : 'SIGTERM');
+        return true;
+      } catch {
+        // If group signalling is unavailable, retain the direct-child fallback.
+      }
+    }
     try {
       return session.child.kill(force ? 'SIGKILL' : 'SIGTERM');
     } catch {
@@ -295,6 +309,11 @@ export class ProcessManager {
         this.kill(session.id, force);
       }
     }
+  }
+
+  /** Permanently stops this manager and terminates every running child. */
+  close(): void {
+    this.#activateKillSwitch();
   }
 
   #attach(session: Session, timeoutMs: number): void {
@@ -391,6 +410,9 @@ export class ProcessManager {
     session.release = undefined;
     this.#detachAbortListener(session);
     if (session.removeOnExit) this.#sessions.delete(session.id);
+    if (![...this.#sessions.values()].some((item) => item.status === 'running')) {
+      this.#stopKillSwitchMonitor();
+    }
   }
 
   #evictExitedForCapacity(): void {
@@ -415,9 +437,35 @@ export class ProcessManager {
 
 
   #assertActive(): void {
-    if (isKillSwitchActive(this.#stateProvider)) {
-      this.killAll(true);
+    if (this.#stopped || isKillSwitchActive(this.#stateProvider)) {
+      this.#activateKillSwitch();
       throw new FreeRdcError(E_KILLSWITCH);
+    }
+  }
+
+  #startKillSwitchMonitor(): void {
+    if (this.#killSwitchMonitor !== undefined || this.#stopped) return;
+    if (isKillSwitchActive(this.#stateProvider)) {
+      this.#activateKillSwitch();
+      return;
+    }
+    this.#killSwitchMonitor = setInterval(() => {
+      if (isKillSwitchActive(this.#stateProvider)) this.#activateKillSwitch();
+    }, KILL_SWITCH_POLL_MS);
+    this.#killSwitchMonitor.unref();
+  }
+
+  #stopKillSwitchMonitor(): void {
+    if (this.#killSwitchMonitor === undefined) return;
+    clearInterval(this.#killSwitchMonitor);
+    this.#killSwitchMonitor = undefined;
+  }
+
+  #activateKillSwitch(): void {
+    this.#stopped = true;
+    this.#stopKillSwitchMonitor();
+    for (const session of this.#sessions.values()) {
+      if (session.status === 'running') this.#terminate(session);
     }
   }
 

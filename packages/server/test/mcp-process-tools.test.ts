@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { basename, join } from "node:path";
-import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { ProcessManager, SafeFilesystem, type CommandPolicy, type CommandRule } from "@freerdc/agent";
+import { InMemoryStateProvider, ProcessManager, SafeFilesystem, type CommandPolicy, type CommandRule } from "@freerdc/agent";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { E_DEVICE_OFFLINE, E_TOO_LARGE } from "@freerdc/protocol";
+import { E_DEVICE_OFFLINE, E_KILLSWITCH, E_TOO_LARGE } from "@freerdc/protocol";
 import { LoopbackMcpHttpHost, createFreeRdcMcpServer } from "../src/index.js";
 
 const NODE = realpathSync(process.execPath);
@@ -78,11 +78,12 @@ async function withTemporaryRoot(
   limits: ConstructorParameters<typeof ProcessManager>[0]["limits"] | undefined,
   body: (client: Client, manager: ProcessManager, root: string) => Promise<void>,
   maxToolOutputBytes?: number,
+  stateProvider?: ConstructorParameters<typeof ProcessManager>[0]["stateProvider"],
 ): Promise<void> {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), `freerdc-mcp-process-${name}-`)));
   const root = join(directory, "root");
   mkdirSync(root);
-  const manager = new ProcessManager({ roots: [root], policy: allowNode(), limits });
+  const manager = new ProcessManager({ roots: [root], policy: allowNode(), limits, stateProvider });
   try {
     await withMcpClient(new SafeFilesystem({ roots: [root] }), manager, (client) => body(client, manager, root), maxToolOutputBytes);
   } finally {
@@ -172,6 +173,42 @@ test("dry-run starts no process and has no child side effect", async () => {
     assert.equal(manager.list().length, 0);
     assert.equal(existsSync(marker), false);
   });
+});
+
+test("MCP terminal_start terminates an idle child after STOP without another MCP call", async () => {
+  const state = new InMemoryStateProvider();
+  await withTemporaryRoot("stop-terminates-child", undefined, async (client, manager, root) => {
+    const heartbeat = join(root, "heartbeat");
+    const started = resultPayload(await client.callTool({ name: "terminal_start", arguments: {
+      executable: NODE,
+      argv: ["-e", [
+        "const fs = require('node:fs');",
+        `const heartbeat = ${JSON.stringify(heartbeat)};`,
+        "let ticks = 0;",
+        "const beat = () => fs.writeFileSync(heartbeat, String(++ticks));",
+        "beat();",
+        "setInterval(beat, 10);",
+      ].join("\n")],
+      dryRun: "off",
+    } }));
+    const id = started.id as string;
+    await waitFor(() => existsSync(heartbeat), "idle child did not create its heartbeat");
+
+    state.setActive(true);
+    // Do not issue another MCP request: ProcessManager must enforce STOP itself.
+    await waitFor(
+      () => manager.list().some((process) => process.id === id && process.status === "exited"),
+      "STOP did not terminate the idle MCP child within the bounded time",
+    );
+    const stoppedHeartbeat = readFileSync(heartbeat, "utf8");
+    await new Promise<void>((resolve) => setTimeout(resolve, 80));
+    assert.equal(readFileSync(heartbeat, "utf8"), stoppedHeartbeat, "child continued after STOP");
+
+    const denied = errorPayload(await client.callTool({ name: "terminal_start", arguments: {
+      executable: NODE, argv: ["-e", "process.exit(0)"], dryRun: "off",
+    } }));
+    assert.deepEqual(denied, { code: E_KILLSWITCH, message: E_KILLSWITCH });
+  }, undefined, state);
 });
 
 test("process input validation, caps, and errors stay safe at the MCP boundary", async () => {
