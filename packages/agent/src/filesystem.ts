@@ -98,6 +98,14 @@ export interface SafeFilesystemOptions {
   readonly roots: readonly string[];
   readonly limits?: SafeFilesystemLimits;
   readonly stateProvider?: StateProvider;
+  /**
+   * Opt out of the multiply-linked regular file denials. A hard link inside a
+   * root whose inode is also reachable outside the root defeats containment,
+   * so every read and mutation of such a file is denied by default. Enabling
+   * this weakens that containment and is only appropriate when a root is
+   * trusted not to share inodes with protected locations.
+   */
+  readonly allowMultiplyLinkedFiles?: boolean;
 }
 
 interface ResolvedPath {
@@ -112,8 +120,9 @@ export class SafeFilesystem {
   readonly #roots: readonly string[];
   readonly #limits: Readonly<Pick<AgentLimits, 'maxReadBytes' | 'maxWriteBytes' | 'maxOutputBytes' | 'maxSearchResults' | 'maxSearchBytes'>>;
   readonly #stateProvider?: StateProvider;
+  readonly #allowMultiplyLinkedFiles: boolean;
 
-  constructor({ roots, limits, stateProvider }: SafeFilesystemOptions) {
+  constructor({ roots, limits, stateProvider, allowMultiplyLinkedFiles }: SafeFilesystemOptions) {
     if (!Array.isArray(roots) || roots.length === 0) {
       throw escapeError();
     }
@@ -167,11 +176,13 @@ export class SafeFilesystem {
       maxSearchBytes: boundedLimit(limits?.maxSearchBytes, DEFAULT_AGENT_LIMITS.maxSearchBytes),
     });
     this.#stateProvider = stateProvider;
+    this.#allowMultiplyLinkedFiles = allowMultiplyLinkedFiles === true;
   }
 
   stat(candidate: string): SafeFilesystemEntry {
     this.#assertActive();
     const resolved = this.#resolve(candidate);
+    this.#assertNotMultiplyLinkedPath(resolved.path);
     const entry = entryFromPath(resolved.path);
     this.#verifyUnchanged(resolved);
     return entry;
@@ -180,6 +191,7 @@ export class SafeFilesystem {
   read(candidate: string): Buffer {
     this.#assertActive();
     const resolved = this.#resolve(candidate);
+    this.#assertNotMultiplyLinkedPath(resolved.path);
     const info = statSync(resolved.path);
     if (!info.isFile()) {
       throw escapeError();
@@ -318,6 +330,9 @@ export class SafeFilesystem {
           if (!fileStats.isFile()) {
             continue;
           }
+          // A multiply-linked file is skipped like any other unsafe child so
+          // its bytes never reach a match count.
+          this.#assertNotMultiplyLinked(fileStats);
           if (fileStats.size > this.#limits.maxSearchBytes - bytesRead) {
             truncated = true;
             break;
@@ -457,6 +472,36 @@ export class SafeFilesystem {
     }
   }
 
+  /**
+   * A hard link inside a root shares one inode with every other name for it,
+   * including names outside the root and on the protected denylist. Such a
+   * file can neither be read nor mutated without leaking or corrupting state
+   * the confinement boundary is meant to keep out of reach, so it is denied
+   * rather than trusted. Callers must pass descriptor stats where a descriptor
+   * is already open so the decision is made on the validated inode.
+   */
+  #assertNotMultiplyLinked(stats: { readonly isFile: () => boolean; readonly nlink: number }): void {
+    if (this.#allowMultiplyLinkedFiles) return;
+    if (stats.isFile() && stats.nlink > 1) throw deniedError();
+  }
+
+  #assertNotMultiplyLinkedPath(filePath: string): void {
+    if (this.#allowMultiplyLinkedFiles) return;
+    let stats: ReturnType<typeof lstatSync>;
+    try {
+      stats = lstatSync(filePath);
+    } catch (error) {
+      if (isFilesystemError(error) && error.code === 'ENOENT') return;
+      throw escapeError();
+    }
+    this.#assertNotMultiplyLinked(stats);
+  }
+
+  #assertNotMultiplyLinkedDescriptor(descriptor: number): void {
+    if (this.#allowMultiplyLinkedFiles) return;
+    this.#assertNotMultiplyLinked(fstatSync(descriptor));
+  }
+
   #resolve(candidate: string): ResolvedPath {
     if (!isAbsolutePath(candidate)) {
       throw escapeError();
@@ -533,6 +578,7 @@ export class SafeFilesystem {
       if (linkStats.isSymbolicLink() || !linkStats.isFile()) {
         throw escapeError();
       }
+      this.#assertNotMultiplyLinked(linkStats);
       return true;
     } catch (error) {
       if (isFilesystemError(error) && error.code === 'ENOENT') {
@@ -559,6 +605,7 @@ export class SafeFilesystem {
         if (!descriptorStats.isFile()) {
           throw escapeError();
         }
+        this.#assertNotMultiplyLinked(descriptorStats);
         const actualSha256 = sha256Descriptor(descriptor);
         if (actualSha256 !== expectedSha256.toLowerCase()) {
           throw staleHashError();
@@ -593,6 +640,7 @@ export class SafeFilesystem {
       if (!fstatSync(descriptor).isFile()) {
         throw escapeError();
       }
+      this.#assertNotMultiplyLinkedDescriptor(descriptor);
       if (overwriting) {
         const actualSha256 = sha256Descriptor(descriptor);
         if (!isSha256(expectedSha256) || actualSha256 !== expectedSha256.toLowerCase()) {
