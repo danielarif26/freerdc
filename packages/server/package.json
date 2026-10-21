@@ -15,7 +15,7 @@
     "@freerdc/guard": "0.1.0",
     "@freerdc/protocol": "0.1.0",
     "@modelcontextprotocol/node": "2.0.0",
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "2.3.0",
     "ws": "8.21.3",
     "zod": "^4.6.1"
   },
